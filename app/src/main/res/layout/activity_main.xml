@@ -8,7 +8,6 @@
     android:background="@color/light_blue"
     tools:context=".MainActivity">
 
-    <!-- Background Image -->
     <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
@@ -22,7 +21,6 @@
             android:src="@drawable/bsu_background" />
     </FrameLayout>
 
-    <!-- Header -->
     <RelativeLayout
         android:id="@+id/headerLayout"
         android:layout_width="match_parent"
@@ -42,7 +40,6 @@
             android:paddingTop="13dp"/>
     </RelativeLayout>
 
-    <!-- Camera Preview Card (Smaller) -->
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/previewCard"
         android:layout_width="600dp"
@@ -71,7 +68,6 @@
             android:layout_gravity="center" />
     </com.google.android.material.card.MaterialCardView>
 
-    <!-- Status Panel -->
     <LinearLayout
         android:id="@+id/status_panel"
         android:layout_width="match_parent"
@@ -105,7 +101,6 @@
             android:textSize="15sp" />
     </LinearLayout>
 
-    <!-- Action Buttons -->
     <LinearLayout
         android:id="@+id/button_panel"
         android:layout_width="wrap_content"

@@ -22,7 +22,6 @@ public class BluetoothServiceSingleton {
         return instance;
     }
 
-    // Overload for existing instance
     public static BluetoothService getInstance() {
         return instance;
     }

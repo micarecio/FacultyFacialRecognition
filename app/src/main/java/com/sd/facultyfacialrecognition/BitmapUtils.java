@@ -5,7 +5,6 @@ import android.graphics.BitmapFactory;
 
 public class BitmapUtils {
 
-    // Load bitmap from a file path
     public static Bitmap loadBitmap(String path) {
         try {
             BitmapFactory.Options options = new BitmapFactory.Options();

@@ -1,43 +1,70 @@
 package com.sd.facultyfacialrecognition;
 
+import android.app.Activity;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.widget.Button;
 import android.widget.TextView;
 
+import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 
 public class ActionActivity extends AppCompatActivity {
 
-    private TextView actionPrompt;
-    private Button breakButton, endClassButton;
-    private String profName;
+    public static final String EXTRA_ACTION = "extra_action";
+    public static final String ACTION_TAKE_BREAK = "take_break";
+    public static final String ACTION_END_CLASS = "end_class";
+    public static final String ACTION_RESUME_CLASS = "resume_class";
+
+    private Button btnTakeBreak;
+    private Button btnEndClass;
+    private Button btnResumeClass;
 
     @Override
-    protected void onCreate(Bundle savedInstanceState) {
+    protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_action);
 
-        profName = getIntent().getStringExtra("profName");
+        SharedPreferences prefs = getSharedPreferences("DoorPrefs", MODE_PRIVATE);
+        String lastRecognizedFace = prefs.getString("lastRecognizedFace", null);
 
-        actionPrompt = findViewById(R.id.text_action_prompt);
-        breakButton = findViewById(R.id.btn_break);
-        endClassButton = findViewById(R.id.btn_end_class);
+        btnTakeBreak = findViewById(R.id.btn_break);
+        btnEndClass = findViewById(R.id.btn_end_class);
+        btnResumeClass = findViewById(R.id.btn_resume_class);
 
-        actionPrompt.setText("Hello Prof. " + profName + ", choose an action:");
+        TextView textActionPrompt = findViewById(R.id.text_action_prompt);
 
-        breakButton.setOnClickListener(v -> {
-            Intent intent = new Intent(ActionActivity.this, DashboardActivity.class);
-            intent.putExtra("profName", profName);
-            intent.putExtra("status", "Prof. " + profName + " is on break.");
-            startActivity(intent);
+        if (lastRecognizedFace != null) {
+            textActionPrompt.setText("Hello, " + lastRecognizedFace);
+        } else {
+            textActionPrompt.setText("Hello, Professor");
+        }
+
+        btnTakeBreak.setOnClickListener(v -> {
+            Intent result = new Intent();
+            result.putExtra(EXTRA_ACTION, ACTION_TAKE_BREAK);
+            setResult(Activity.RESULT_OK, result);
+            finish();
         });
 
-        endClassButton.setOnClickListener(v -> {
-            Intent intent = new Intent(ActionActivity.this, ThankYouActivity.class);
-            intent.putExtra("message", "Class ended, thank you.");
-            startActivity(intent);
+        btnEndClass.setOnClickListener(v -> {
+            Intent result = new Intent();
+            result.putExtra(EXTRA_ACTION, ACTION_END_CLASS);
+            setResult(Activity.RESULT_OK, result);
+            finish();
         });
 
+        btnResumeClass.setOnClickListener(v -> {
+            Intent result = new Intent();
+            result.putExtra(EXTRA_ACTION, ACTION_RESUME_CLASS);
+            setResult(Activity.RESULT_OK, result);
+            finish();
+        });
+    }
+
+    @SuppressWarnings("MissingSuperCall")
+    @Override
+    public void onBackPressed() {
     }
 }

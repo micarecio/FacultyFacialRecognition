@@ -1,5 +1,6 @@
 package com.sd.facultyfacialrecognition;
 
+import android.app.Activity;
 import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
@@ -13,13 +14,17 @@ public class ThankYouActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_thank_you);
 
-        String message = getIntent().getStringExtra("message");
+        String profName = getIntent().getStringExtra("profName");
+        if (profName == null || profName.isEmpty()) profName = "Professor";
+
+        String status = getIntent().getStringExtra("status");
+        if (status == null) status = "";
+
         TextView msg = findViewById(R.id.text_goodbye);
-        msg.setText(message);
+        msg.setText("Goodbye, " + profName + "!\n" + status);
 
         new Handler().postDelayed(() -> {
-            // Return to face recognition screen
-            Intent intent = new Intent(ThankYouActivity.this, MainActivity.class);
+            Intent intent = new Intent(ThankYouActivity.this, HomeActivity.class);
             startActivity(intent);
             finish();
         }, 3000);

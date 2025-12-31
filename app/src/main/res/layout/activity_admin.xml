@@ -54,7 +54,6 @@
         android:paddingEnd="4dp"
         android:paddingVertical="10dp">
 
-        <!-- Camera preview on the left -->
         <com.google.android.material.card.MaterialCardView
             android:layout_width="0dp"
             android:layout_height="400dp"
@@ -70,7 +69,6 @@
 
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- Buttons on the right -->
         <LinearLayout
             android:id="@+id/buttonsLayout"
             android:layout_width="186dp"
@@ -78,8 +76,6 @@
             android:layout_marginStart="16dp"
             android:layout_marginEnd="16dp"
             android:orientation="vertical">
-
-            <!-- Add Faculty button -->
 
             <ImageView
                 android:id="@+id/imageView5"
@@ -106,7 +102,6 @@
                 android:fontFamily="@font/generalsans_medium"
                 app:strokeWidth="2dp" />
 
-            <!-- Delete Faculty button -->
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/buttonDeleteFaculty"
                 android:layout_width="match_parent"
@@ -121,7 +116,6 @@
                 android:fontFamily="@font/generalsans_medium"
                 app:strokeWidth="2dp" />
 
-            <!-- Import Drive button -->
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/buttonImportLocalImages"
                 android:layout_width="match_parent"
@@ -136,7 +130,6 @@
                 android:fontFamily="@font/generalsans_medium"
                 app:strokeWidth="2dp" />
 
-            <!-- Generate Embeddings button -->
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/buttonGenerateEmbeddings"
                 android:layout_width="match_parent"
@@ -153,7 +146,6 @@
         </LinearLayout>
     </LinearLayout>
 
-    <!-- Status TextView -->
     <ProgressBar
         android:id="@+id/progressBar"
         style="?android:attr/progressBarStyleHorizontal"

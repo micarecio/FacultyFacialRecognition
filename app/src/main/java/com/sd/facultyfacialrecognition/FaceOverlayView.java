@@ -30,7 +30,7 @@ public class FaceOverlayView extends View {
         boxPaint = new Paint();
         boxPaint.setStyle(Paint.Style.STROKE);
         boxPaint.setStrokeWidth(5f);
-        boxPaint.setColor(Color.GREEN);
+        boxPaint.setColor(Color.BLUE);
 
         textPaint = new Paint();
         textPaint.setTextSize(40f);

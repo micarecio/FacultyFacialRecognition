@@ -107,7 +107,6 @@ public class AdminActivity extends AppCompatActivity {
         buttonImportLocalImages.setOnClickListener(v -> promptFacultyNameForLocalImport());
     }
 
-    // -------------------- Storage Permissions --------------------
     private void requestStoragePermissions() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED
@@ -120,7 +119,6 @@ public class AdminActivity extends AppCompatActivity {
         }
     }
 
-    // -------------------- Add Faculty --------------------
     private void showAddFacultyDialog() {
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         builder.setTitle("Enter Faculty Name");
@@ -148,12 +146,10 @@ public class AdminActivity extends AppCompatActivity {
         currentFacultyDir = new File(picturesDir, "FacultyPhotos/" + facultyName);
 
         if (currentFacultyDir.exists()) {
-            // Faculty already exists — ask user whether to overwrite
             new AlertDialog.Builder(this)
                     .setTitle("Faculty Exists")
                     .setMessage("A faculty named \"" + facultyName + "\" already exists. Do you want to overwrite their existing photos?")
                     .setPositiveButton("Overwrite", (dialog, which) -> {
-                        // Delete existing folder and recreate
                         deleteRecursive(currentFacultyDir);
                         currentFacultyDir.mkdirs();
 
@@ -167,7 +163,6 @@ public class AdminActivity extends AppCompatActivity {
                     })
                     .show();
         } else {
-            // Faculty doesn’t exist — proceed normally
             currentFacultyDir.mkdirs();
             photoCount = 0;
             textStatus.setText("Ready to capture photos for: " + facultyName);
@@ -205,7 +200,6 @@ public class AdminActivity extends AppCompatActivity {
         fileOrDirectory.delete();
     }
 
-    // -------------------- Remove Faculty from Embeddings --------------------
     private void removeFacultyFromEmbeddings(String facultyName) {
         try {
             File embeddingsFile = new File(
@@ -218,7 +212,6 @@ public class AdminActivity extends AppCompatActivity {
                 return;
             }
 
-            // Read JSON file
             StringBuilder jsonBuilder = new StringBuilder();
             Scanner scanner = new Scanner(embeddingsFile);
             while (scanner.hasNextLine()) {
@@ -232,7 +225,6 @@ public class AdminActivity extends AppCompatActivity {
                 return;
             }
 
-            // Parse and remove faculty entry
             Gson gson = new Gson();
             Map<String, List<float[]>> allEmbeddings = gson.fromJson(
                     jsonString,
@@ -243,7 +235,6 @@ public class AdminActivity extends AppCompatActivity {
                 allEmbeddings.remove(facultyName);
                 Log.d("Embeddings", "Removed faculty from embeddings: " + facultyName);
 
-                // Write updated JSON back
                 try (FileWriter writer = new FileWriter(embeddingsFile)) {
                     gson.toJson(allEmbeddings, writer);
                 }
@@ -257,7 +248,6 @@ public class AdminActivity extends AppCompatActivity {
         }
     }
 
-    // -------------------- CameraX --------------------
     private void startCameraForFaculty() {
         ProcessCameraProvider.getInstance(this).addListener(() -> {
             try {
@@ -344,7 +334,6 @@ public class AdminActivity extends AppCompatActivity {
         }
     }
 
-    // -------------------- Local Image Import --------------------
     private void promptFacultyNameForLocalImport() {
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         builder.setTitle("Import Local Faculty Photos");
@@ -418,7 +407,6 @@ public class AdminActivity extends AppCompatActivity {
         File facultyDir = new File(getExternalFilesDir(Environment.DIRECTORY_PICTURES), "FacultyPhotos/" + currentFacultyName);
         if (!facultyDir.exists()) facultyDir.mkdirs();
 
-        // Use a background thread for image processing
         new Thread(() -> {
             runOnUiThread(() -> {
                 progressBar.setVisibility(View.VISIBLE);
@@ -611,7 +599,6 @@ public class AdminActivity extends AppCompatActivity {
         outputStream.close();
     }
 
-    // -------------------- Embeddings --------------------
     private void generateEmbeddings() {
         textStatus.setText("Generating embeddings...");
         new Thread(() -> {
@@ -647,7 +634,6 @@ public class AdminActivity extends AppCompatActivity {
                         Bitmap bitmap = BitmapFactory.decodeFile(photo.getAbsolutePath());
                         if (bitmap == null) continue;
 
-                        // The face should already be aligned from the import step, but we can re-align just in case.
                         Bitmap faceBitmap = faceAligner.alignFace(bitmap);
                         if (faceBitmap == null) continue;
 
@@ -683,13 +669,12 @@ public class AdminActivity extends AppCompatActivity {
         }).start();
     }
 
+    @SuppressWarnings("MissingSuperCall")
     @Override
     public void onBackPressed() {
         Intent intent = new Intent(AdminActivity.this, PinLockActivity.class);
         startActivity(intent);
         finish();
-
-        super.onBackPressed();
     }
 
     @Override

@@ -16,7 +16,6 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
-    <!-- ⭐ All your texts + button inside one centered LinearLayout -->
     <LinearLayout
         android:id="@+id/center_block"
         android:layout_width="wrap_content"
@@ -51,7 +50,7 @@
             android:id="@+id/text_status"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Status: In Class"
+            android:text="Status:"
             android:fontFamily="@font/generalsans_semibold"
             android:textSize="20sp"
             android:textColor="#FFFFFF"

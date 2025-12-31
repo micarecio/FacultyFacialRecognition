@@ -1,6 +1,7 @@
 package com.sd.facultyfacialrecognition;
 
 import android.Manifest;
+import android.app.Activity;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.content.pm.PackageManager;
@@ -57,6 +58,7 @@ import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import android.content.SharedPreferences;
 
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
@@ -68,12 +70,11 @@ import java.util.Date;
 import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.FirebaseDatabase;
 
-
-
 public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
     private static final int REQUEST_CAMERA_PERMISSION = 1001;
-
+    private static final int REQUEST_BLUETOOTH_PERMISSION = 2001;
+    private static final int REQ_ACTION = 9001;
     private PreviewView previewView;
     private FaceOverlayView overlayView;
     private TextView statusTextView;
@@ -81,37 +82,33 @@ public class MainActivity extends AppCompatActivity {
     private Button confirmYesButton;
     private Button confirmNoButton;
     private Button btnBreakDone;
-
     private FaceNet faceNet;
     private ImageAligner imageAligner;
     private ExecutorService cameraExecutor;
-
     private final Map<String, float[]> KNOWN_FACE_EMBEDDINGS = new HashMap<>();
     private Map<String, List<float[]>> facultyEmbeddings = new HashMap<>();
-
     private float dynamicThreshold = 0.66f;
-
     private static final int STABILITY_FRAMES_NEEDED = 7;
     private static final long UNLOCK_COOLDOWN_MILLIS = 10000;
-
     private static final long CONFIRMATION_TIMEOUT_MILLIS = 10000;
     private static final int VISUAL_COUNTDOWN_SECONDS = 5;
+    private String mode = "";
+    private boolean isRescanModeActive = false;
 
-    private String stableMatchName = "Scanning...";
     private String currentBestMatch = "Scanning...";
+    private String stableMatchName = "Scanning...";
+    private String authorizedUnlocker = null;
+    private String authorizedLocker = null;
+    private boolean isDoorLocked = true;
+    private boolean isAwaitingUnlockConfirmation = false;
+    private boolean isAwaitingLockConfirmation = false;
     private int stableMatchCount = 0;
     private String lastMatchName = "";
-
-    private boolean isDoorLocked = true;
-    private boolean isAwaitingLockConfirmation = false;
-    private boolean isAwaitingUnlockConfirmation = false;
+    private boolean unlockProcessed = false;
+    private String lastLatestStatus = "";
     private boolean isAwaitingLockerRecognition = false;
     private boolean isReturningFromBreak = false;
-
-    private String authorizedLocker = null;
-    private String authorizedUnlocker = null;
     private long lastLockTimestamp = 0;
-
     private Handler confirmationHandler;
     private Runnable confirmationRunnable;
     private Handler countdownDisplayHandler;
@@ -121,13 +118,26 @@ public class MainActivity extends AppCompatActivity {
     private BluetoothAdapter bluetoothAdapter;
     private BluetoothService bluetoothService;
     private BluetoothDevice bluetoothDevice;
-
     private String currentLab = "CpeLab";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+
+        mode = getIntent().getStringExtra("mode");
+        String receivedUnlocker = getIntent().getStringExtra("authorizedUnlocker");
+
+        if ("rescan".equals(mode) && receivedUnlocker != null) {
+            authorizedUnlocker = receivedUnlocker;
+            isRescanModeActive = true;
+
+            Intent intent = new Intent(MainActivity.this, ActionActivity.class);
+            intent.putExtra("currentFaculty", authorizedUnlocker);
+            startActivity(intent);
+            finish();
+            return;
+        }
 
         previewView = findViewById(R.id.previewView);
         overlayView = findViewById(R.id.faceOverlayView);
@@ -147,19 +157,22 @@ public class MainActivity extends AppCompatActivity {
         cameraExecutor = Executors.newSingleThreadExecutor();
         imageAligner = new ImageAligner();
 
-
         initializeSystem();
         startCamera();
         testLoadEmbeddings();
 
         db = FirebaseFirestore.getInstance();
 
+        if (!hasBluetoothPermission()) {
+            requestBluetoothPermission();
+            return;
+        }
+
         bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
 
         String deviceName = "CpE Laboratory Lock";
         String deviceAddress = "D4:E9:F4:E2:F8:02";
 
-        // Find paired device
         bluetoothDevice = findPairedDevice(deviceName, deviceAddress);
         if (bluetoothDevice == null) {
             Log.e(TAG, "Bluetooth device not found!");
@@ -167,19 +180,39 @@ public class MainActivity extends AppCompatActivity {
         }
 
         bluetoothService = BluetoothServiceSingleton.getInstance(this, bluetoothDevice);
-
-
     }
+
+    private boolean hasBluetoothPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            return ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.BLUETOOTH_CONNECT
+            ) == PackageManager.PERMISSION_GRANTED;
+        }
+        return true;
+    }
+
+    private void requestBluetoothPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            ActivityCompat.requestPermissions(
+                    this,
+                    new String[]{
+                            Manifest.permission.BLUETOOTH_CONNECT,
+                            Manifest.permission.BLUETOOTH_SCAN
+                    },
+                    REQUEST_BLUETOOTH_PERMISSION
+            );
+        }
+    }
+
 
     private BluetoothDevice findPairedDevice(String name, String address) {
         if (bluetoothAdapter == null) return null;
 
-        // Check BLUETOOTH_CONNECT permission (required for Android 12+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT)
                     != PackageManager.PERMISSION_GRANTED) {
                 Log.e(TAG, "BLUETOOTH_CONNECT permission not granted!");
-                // Optionally, you can request permission here using ActivityCompat.requestPermissions
                 return null;
             }
         }
@@ -197,10 +230,8 @@ public class MainActivity extends AppCompatActivity {
         try {
             faceNet = new FaceNet(this, "facenet.tflite");
 
-            // Try loading from storage first
             boolean embeddingsLoaded = loadEmbeddingsFromStorage();
             if (!embeddingsLoaded) {
-                // Fallback to assets
                 embeddingsLoaded = loadEmbeddingsFromAssets();
             }
 
@@ -275,299 +306,233 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    public void onConfirmYesClicked(View view) {
-        stopConfirmationTimer();
-        stopVisualCountdown();
-
-        if (isAwaitingLockConfirmation) {
-            handleLockConfirmation();
-
-        } else if (isAwaitingUnlockConfirmation) {
-            handleUnlockConfirmation();
-        }
-    }
-
     private String getCurrentTimestamp() {
         SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd | EEEE | HH:mm:ss", Locale.getDefault());
         return sdf.format(new Date());
     }
 
-    private void updateRealtimeStatus(String facultyStatus, String doorStatus) {
-        if (authorizedUnlocker == null ||
-                authorizedUnlocker.equals("Scanning...") ||
-                authorizedUnlocker.equals("Unknown")) {
-            Log.w("DoorDebug", "Skipping Realtime DB update: unauthorized or unknown faculty.");
+    private String lastRecognizedFace = "Scanning...";
+    
+    private void updateDoorStatus(String facultyName, String facultyStatus, String doorStatus) {
+        if (facultyName == null || facultyName.equals("Scanning...") || facultyName.equals("Unknown")) {
+            Log.w("DoorDebug", "Skipping updateDoorStatus: invalid facultyName");
             return;
         }
 
-        String timestamp = new SimpleDateFormat("yyyy-MM-dd | EEEE | HH:mm:ss", Locale.getDefault())
-                .format(new Date());
+        String timestamp = new SimpleDateFormat("yyyy-MM-dd | EEEE | HH:mm:ss", Locale.getDefault()).format(new Date());
 
         Map<String, Object> data = new HashMap<>();
+        data.put("facultyName", facultyName);
         data.put("facultyStatus", facultyStatus);
-        data.put("facultyName", authorizedUnlocker);
         data.put("doorStatus", doorStatus);
         data.put("timestamp", timestamp);
+        data.put("lab", currentLab);
+
+        db.collection("DoorLogs")
+                .add(data)
+                .addOnSuccessListener(docRef -> Log.d("DoorLockDebug",
+                        "Door event logged: " + facultyName + " | " + facultyStatus + " | " + doorStatus + " | " + timestamp))
+                .addOnFailureListener(e -> Log.e("DoorLockDebug", "Error logging door event", e));
+
+        String newStatusKey = facultyName + "|" + facultyStatus + "|" + doorStatus;
+        if (!newStatusKey.equals(lastLatestStatus)) {
+            lastLatestStatus = newStatusKey;
+            db.collection(currentLab).document("Latest")
+                    .set(data)
+                    .addOnSuccessListener(aVoid -> Log.d("DoorLockDebug",
+                            "Updated " + currentLab + " Latest: " + facultyName + " | " + facultyStatus + " | " + doorStatus))
+                    .addOnFailureListener(e -> Log.e("DoorLockDebug",
+                            "Error updating " + currentLab + " Latest", e));
+        } else {
+            Log.d("DoorLockDebug", "Duplicate Latest update skipped: " + newStatusKey);
+        }
 
         try {
             FirebaseDatabase database = FirebaseDatabase.getInstance(
                     "https://facultyfacialrecognition-default-rtdb.asia-southeast1.firebasedatabase.app/"
             );
-
-            DatabaseReference dbRef = database
-                    .getReference(currentLab)
-                    .child("Latest");
-
+            DatabaseReference dbRef = database.getReference(currentLab).child("Latest");
             dbRef.setValue(data)
                     .addOnSuccessListener(aVoid -> Log.d("DoorDebug", "Realtime DB successfully updated"))
                     .addOnFailureListener(e -> Log.e("DoorDebug", "Realtime DB update FAILED", e));
-
-
         } catch (Exception e) {
             Log.e("DoorDebug", "Database initialization error", e);
         }
     }
 
+    private void debugState(String location) {
+        Log.d("DoorDebug", "---- DEBUG STATE: " + location + " ----");
+        Log.d("DoorDebug", "authorizedUnlocker: " + authorizedUnlocker);
+        Log.d("DoorDebug", "authorizedLocker: " + authorizedLocker);
+        Log.d("DoorDebug", "currentBestMatch: " + currentBestMatch);
+        Log.d("DoorDebug", "stableMatchName: " + stableMatchName);
+        Log.d("DoorDebug", "lastRecognizedFace: " + lastRecognizedFace);
+        Log.d("DoorDebug", "stableMatchCount: " + stableMatchCount);
+        Log.d("DoorDebug", "lastLatestStatus: " + lastLatestStatus);
+        Log.d("DoorDebug", "isDoorLocked: " + isDoorLocked);
+        Log.d("DoorDebug", "isAwaitingUnlockConfirmation: " + isAwaitingUnlockConfirmation);
+        Log.d("DoorDebug", "isAwaitingLockConfirmation: " + isAwaitingLockConfirmation);
+        Log.d("DoorDebug", "isReturningFromBreak: " + isReturningFromBreak);
+        Log.d("DoorDebug", "-------------------------------");
+    }
+    private void handleUnlockConfirmation() {
 
-    private void logDoorEvent(String facultyName, String facultyStatus, String doorStatus) {
-        if (facultyName == null || facultyName.equals("Scanning...") || facultyName.equals("Unknown")) {
-            Log.w("DoorLockDebug", "Skipping logging: invalid faculty name");
+
+        SharedPreferences prefs = getSharedPreferences("DoorPrefs", MODE_PRIVATE);
+        String savedFirstUnlocker = prefs.getString("lastRecognizedFace", null);
+
+        if (savedFirstUnlocker == null && !"Scanning...".equals(stableMatchName)) {
+            lastRecognizedFace = stableMatchName;
+
+            prefs.edit().putString("lastRecognizedFace", lastRecognizedFace).apply();
+
+            Log.d("DoorDebug", "First scan — lastRecognizedFace set to: " + lastRecognizedFace);
+
+            isDoorLocked = false;
+            isAwaitingUnlockConfirmation = false;
+            unlockProcessed = true;
+
+            Log.d("DoorDebug", "Door unlocked by first scan: " + lastRecognizedFace);
+
+            sendBluetoothStatus("UNLOCKED");
+            updateDoorStatus(lastRecognizedFace, "In Class", "UNLOCKED");
+
+            if (cameraExecutor != null) cameraExecutor.shutdown();
+
+            Intent intent = new Intent(this, DashboardActivity.class);
+            intent.putExtra("profName", lastRecognizedFace);
+            startActivity(intent);
+
+            debugState("End of handleUnlockConfirmation - door unlocked");
             return;
         }
 
-        String timestamp = getCurrentTimestamp();
+        if (savedFirstUnlocker != null) {
+            lastRecognizedFace = savedFirstUnlocker;
+            authorizedUnlocker = stableMatchName;
 
-        Map<String, Object> logEntry = new HashMap<>();
-        logEntry.put("facultyName", facultyName);
-        logEntry.put("facultyStatus", facultyStatus);
-        logEntry.put("doorStatus", doorStatus);
-        logEntry.put("timestamp", timestamp);
-        logEntry.put("lab", currentLab);
+            Log.d("DoorDebug", "Rescan — authorizedUnlocker updated to: " + authorizedUnlocker);
 
-        db.collection("DoorLogs")
-                .add(logEntry)
-                .addOnSuccessListener(docRef -> Log.d("DoorLockDebug",
-                        "Door event logged: " + facultyName + " | " + facultyStatus + " | " + doorStatus + " | " + timestamp))
-                .addOnFailureListener(e -> Log.e("DoorLockDebug", "Error logging door event", e));
+            debugState("Rescan - accessing ActionActivity");
 
-        updateLabStatus(facultyName, facultyStatus, doorStatus, timestamp);
-    }
+            if (!lastRecognizedFace.equals(authorizedUnlocker)) {
+                Toast.makeText(this, "Only " + lastRecognizedFace + " can take actions.", Toast.LENGTH_SHORT).show();
+                Intent intent = new Intent(this, DashboardActivity.class);
+                intent.putExtra("profName", lastRecognizedFace);
+                intent.putExtra("status", "Access denied. Please rescan your face.");
+                startActivity(intent);
+                return;
+            }
 
-    private void updateLabStatus(String facultyName, String facultyStatus, String doorStatus, String timestamp) {
-        if (facultyName == null || facultyName.equals("Scanning...") || facultyName.equals("Unknown")) return;
-
-        Map<String, Object> data = new HashMap<>();
-        data.put("facultyName", facultyName);   // store the name
-        data.put("facultyStatus", facultyStatus);
-        data.put("doorStatus", doorStatus);
-        data.put("timestamp", timestamp);
-
-        db.collection(currentLab)
-                .document("Latest")   // Always overwrite the same document
-                .set(data)
-                .addOnSuccessListener(aVoid -> Log.d("DoorLockDebug",
-                        "Updated " + currentLab + " Latest: " + facultyName + " | " + facultyStatus + " | " + doorStatus + " | " + timestamp))
-                .addOnFailureListener(e -> Log.e("DoorLockDebug",
-                        "Error updating " + currentLab + " Latest", e));
+            Intent intent = new Intent(this, ActionActivity.class);
+            intent.putExtra("currentFaculty", lastRecognizedFace);
+            startActivityForResult(intent, REQ_ACTION);
+        }
     }
 
 
     private void handleLockConfirmation() {
-        isDoorLocked = true;
-        isAwaitingLockConfirmation = false;
-        isAwaitingLockerRecognition = false;
-        lastLockTimestamp = System.currentTimeMillis();
-
-        BluetoothService service = BluetoothServiceSingleton.getInstance();
-        if (service != null && service.isConnected()) {
-            service.sendDoorStatus("LOCKED");
+        if (lastRecognizedFace.equals("Scanning...")) {
+            Log.d("DoorLockDebug", "Lock denied: no unlocker set");
+            return;
         }
 
-        final String facultyNameFinal = authorizedLocker; // make final for lambda
-        final String status = "LOCKED";
+        isDoorLocked = true;
+        isAwaitingLockConfirmation = false;
 
-        Log.d("DoorLockDebug", "Handling LOCK confirmation for faculty: " + facultyNameFinal);
+        authorizedLocker = currentBestMatch != null && !currentBestMatch.equals("Scanning...") ?
+                currentBestMatch : authorizedUnlocker;
 
-        // Log door event
-        logDoorEvent(authorizedLocker, "End Class", "LOCKED");
+        authorizedUnlocker = null;
+        unlockProcessed = false;
 
-        // Update Firestore with debug
-        updateFacultyStatusWithDebug(facultyNameFinal, status);
+        sendBluetoothStatus("LOCKED");
+        Log.d("DoorLockDebug", "Door locked by: " + authorizedLocker);
 
-        resetStateAfterAction();
+        updateDoorStatus(authorizedLocker, "End Class", "LOCKED");
         updateUiOnThread("System Locked", "Door secured. Cooldown active.");
     }
 
-    private void handleUnlockConfirmation() {
-        isDoorLocked = false;
-        isAwaitingUnlockConfirmation = false;
-        final String facultyNameFinal = stableMatchName;
-        authorizedUnlocker = facultyNameFinal;
-
+    private void sendBluetoothStatus(String status) {
         BluetoothService service = BluetoothServiceSingleton.getInstance();
         if (service != null && service.isConnected()) {
-            service.sendDoorStatus("UNLOCKED");
+            service.sendDoorStatus(status);
+            Log.d("DoorLockDebug", "Bluetooth: " + status + " sent");
         }
-
-        String facultyStatus = "In Class";
-        String doorStatus = "UNLOCKED";
-        String timestamp = new SimpleDateFormat("yyyy-MM-dd | EEEE | HH:mm:ss", Locale.getDefault()).format(new Date());
-
-        Log.d("DoorLockDebug", "Handling UNLOCK confirmation for faculty: " + facultyNameFinal);
-
-        // Firestore logs
-        logDoorEvent(facultyNameFinal, facultyStatus, doorStatus);
-
-        // Firestore lab status update
-        updateLabStatus(facultyNameFinal, facultyStatus, doorStatus, timestamp);
-
-        // Realtime Database update
-        updateRealtimeStatus(facultyStatus, doorStatus);
-
-        if (cameraExecutor != null) {
-            cameraExecutor.shutdown();
-        }
-
-        boolean isRescanMode = getIntent().hasExtra("mode") &&
-                "rescan".equals(getIntent().getStringExtra("mode"));
-        boolean isFromBreak = getIntent().getBooleanExtra("from_break", false);
-
-        if (isRescanMode) {
-            runOnUiThread(() -> {
-                if (isFromBreak) {
-                    findViewById(R.id.btn_break_done).setVisibility(View.VISIBLE);
-                } else {
-                    findViewById(R.id.btn_take_break).setVisibility(View.VISIBLE);
-                    findViewById(R.id.btn_end_class).setVisibility(View.VISIBLE);
-                }
-                findViewById(R.id.confirm_yes_button).setVisibility(View.GONE);
-                findViewById(R.id.confirm_no_button).setVisibility(View.GONE);
-
-                updateUiOnThread("What would you like to do?", "Select an option below.");
-            });
-
-            resetStateAfterAction();
-            return;
-        }
-
-        Intent intent = new Intent(MainActivity.this, DashboardActivity.class);
-        intent.putExtra("profName", facultyNameFinal);
-        startActivity(intent);
-
-        resetStateAfterAction();
-        updateUiOnThread("Access Granted:\n" + facultyNameFinal,
-                "Door UNLOCKED. Choose options below.");
     }
 
+    private boolean canAccessActionActivity() {
+        return lastRecognizedFace.equals(currentBestMatch) && !currentBestMatch.equals("Scanning...");
+    }
 
-    // New method with detailed debug logging
-    private void updateFacultyStatusWithDebug(String facultyName, String status) {
-        if (facultyName == null || facultyName.equals("Scanning...") || facultyName.equals("Unknown")) {
-            Log.e("DoorLockDebug", "Skipping Firestore update: invalid faculty name '" + facultyName + "'");
-            return;
-        }
+    public boolean isDoorUnlocker(String currentUser) {
+        return authorizedUnlocker != null && authorizedUnlocker.equals(currentUser);
+    }
 
-        final String facultyNameFinal = facultyName;
-        final String statusFinal = status;
+    private void resetStateAfterAction() {
+        stableMatchCount = 0;
+        stableMatchName = "Scanning...";
+        currentBestMatch = "Scanning...";
 
-        Log.d("DoorLockDebug", "Updating Firestore for faculty: " + facultyNameFinal + " with status: " + statusFinal);
-
-        Map<String, Object> data = new HashMap<>();
-        data.put("status", statusFinal); // will be "LOCKED", "UNLOCKED", or "BREAK"
-        data.put("timestamp", System.currentTimeMillis());
-
-        db.collection(currentLab)
-                .document(facultyNameFinal)
-                .set(data)
-                .addOnSuccessListener(aVoid -> Log.d("DoorLockDebug", "Successfully updated faculty status for " + facultyNameFinal))
-                .addOnFailureListener(e -> Log.e("DoorLockDebug", "Error updating faculty status for " + facultyNameFinal, e));
+        isAwaitingUnlockConfirmation = false;
+        isAwaitingLockConfirmation = false;
+        isAwaitingLockerRecognition = false;
     }
 
     public void onTakeBreakClicked(View view) {
-        if (authorizedUnlocker == null) return;
-
-        String facultyNameFinal = authorizedUnlocker;
-        String facultyStatus = "Break";
-        String doorStatus = "UNLOCKED";
-        String timestamp = new SimpleDateFormat("yyyy-MM-dd | EEEE | HH:mm:ss", Locale.getDefault()).format(new Date());
-
-        Log.d("DoorLockDebug", "Professor taking break: " + facultyNameFinal);
-
-        logDoorEvent(facultyNameFinal, facultyStatus, doorStatus);
-        updateLabStatus(facultyNameFinal, facultyStatus, doorStatus, timestamp);
-        updateRealtimeStatus(facultyStatus, doorStatus);
-
-        // Navigate to dashboard
-        Intent intent = new Intent(MainActivity.this, DashboardActivity.class);
-        intent.putExtra("profName", facultyNameFinal);
-        intent.putExtra("status", "Professor is on break. Please scan to resume class.");
-        startActivity(intent);
-        finish();
-    }
-
-
-
-    public void onBackInClassScanned() {
-        stableMatchCount = 0;
-        authorizedUnlocker = null;
-        stableMatchName = "Scanning...";
-        currentBestMatch = "Scanning...";
-        updateUiOnThread("Professor Back in Class", "Please scan to confirm identity.");
-    }
-
-    public void onEndClassClicked(View view) {
-        if (authorizedUnlocker == null) return;
-
-        isAwaitingLockerRecognition = true;
-        stableMatchCount = 0;
-
-        String facultyNameFinal = authorizedUnlocker;
-        String facultyStatus = "End Class";
-        String doorStatus = "LOCKED";
-        String timestamp = new SimpleDateFormat("yyyy-MM-dd | EEEE | HH:mm:ss", Locale.getDefault()).format(new Date());
-
-        BluetoothService service = BluetoothServiceSingleton.getInstance();
-        if (service != null && service.isConnected()) {
-            service.sendDoorStatus("LOCKED");
+        if (!lastRecognizedFace.equals(authorizedUnlocker)) {
+            Toast.makeText(this, "Only " + lastRecognizedFace + " may take a break.", Toast.LENGTH_SHORT).show();
+            return;
         }
+        updateDoorStatus(authorizedUnlocker, "On Break", "UNLOCKED");
 
-        Log.d("DoorLockDebug", "Class ended by: " + facultyNameFinal);
-
-        // Firestore logging
-        logDoorEvent(facultyNameFinal, facultyStatus, doorStatus);
-        updateLabStatus(facultyNameFinal, facultyStatus, doorStatus, timestamp);
-
-        // Realtime Database update
-        updateRealtimeStatus(facultyStatus, doorStatus);
-
-        isDoorLocked = true;
-
-        Intent intent = new Intent(MainActivity.this, ThankYouActivity.class);
-        intent.putExtra("message", "Class ended and door is locked, thank you!");
+        Intent intent = new Intent(this, DashboardActivity.class);
+        intent.putExtra("profName", lastRecognizedFace);
+        intent.putExtra("status", "Status: On Break\n\nScan Your Face Again to Resume Class.");
         startActivity(intent);
         finish();
     }
-
-
 
     public void onBreakDoneClicked(View view) {
         if (authorizedUnlocker == null) return;
-
         isReturningFromBreak = true;
+        updateDoorStatus(authorizedUnlocker, "In Class", "UNLOCKED");
 
-        String facultyStatus = "In Class";
-        String doorStatus = "UNLOCKED";
-
-        // Realtime Database update
-        updateRealtimeStatus(facultyStatus, doorStatus);
-
-        Intent intent = new Intent(MainActivity.this, DashboardActivity.class);
+        Intent intent = new Intent(this, DashboardActivity.class);
         intent.putExtra("profName", authorizedUnlocker);
         startActivity(intent);
         finish();
     }
 
+    public void onEndClassClicked(View view) {
+        if (!lastRecognizedFace.equals(authorizedUnlocker)) {
+            Toast.makeText(this, "Only " + lastRecognizedFace + " may end the class.", Toast.LENGTH_SHORT).show();
+            return;
+        }
 
+        handleLockConfirmation();
+
+        Intent intent = new Intent(this, ThankYouActivity.class);
+        intent.putExtra("profName", lastRecognizedFace);
+        intent.putExtra("status", "Class ended. Door locked.");
+        startActivity(intent);
+
+        SharedPreferences prefs = getSharedPreferences("DoorPrefs", MODE_PRIVATE);
+        prefs.edit().remove("lastRecognizedFace").apply();
+        lastRecognizedFace = "Scanning...";
+        authorizedUnlocker = null;
+
+        finish();
+    }
+
+
+    public void onConfirmYesClicked(View view) {
+        stopConfirmationTimer();
+        stopVisualCountdown();
+
+        if (isAwaitingLockConfirmation) handleLockConfirmation();
+        else if (isAwaitingUnlockConfirmation) handleUnlockConfirmation();
+    }
 
     public void onConfirmNoClicked(View view) {
         stopConfirmationTimer();
@@ -577,17 +542,10 @@ public class MainActivity extends AppCompatActivity {
             isAwaitingLockConfirmation = false;
             isAwaitingLockerRecognition = false;
             authorizedLocker = null;
-
-            if (view != null) {
-                updateUiOnThread("Access Granted: " + authorizedUnlocker, "Lock cancelled by user. Door is UNLOCKED.");
-            }
-
+            updateUiOnThread("Access Granted: " +  lastRecognizedFace, "Lock cancelled by user. Door is UNLOCKED.");
         } else if (isAwaitingUnlockConfirmation) {
             isAwaitingUnlockConfirmation = false;
-
-            if (view != null) {
-                updateUiOnThread("Access Denied", "Unlock cancelled by user. Awaiting recognition.");
-            }
+            updateUiOnThread("Access Denied", "Unlock cancelled by user. Awaiting recognition.");
         }
 
         stableMatchCount = 0;
@@ -595,12 +553,9 @@ public class MainActivity extends AppCompatActivity {
         currentBestMatch = "Scanning...";
     }
 
-    private void resetStateAfterAction() {
-        stableMatchCount = 0;
-        authorizedLocker = null;
-        stableMatchName = "Scanning...";
-        currentBestMatch = "Scanning...";
-    }
+
+
+
 
     private boolean allPermissionsGranted() {
         return ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
@@ -627,7 +582,7 @@ public class MainActivity extends AppCompatActivity {
             Log.e("Camera", "Camera blocked: Bluetooth not connected.");
             return;
         }
-        startCamera(); // call your existing camera initialization
+        startCamera();
     }
 
 
@@ -680,7 +635,6 @@ public class MainActivity extends AppCompatActivity {
 
         Bitmap fullBmp = InputImageUtils.getBitmapFromInputImage(this, inputImage);
         if (fullBmp == null) {
-            // If the bitmap couldn't be created, stop.
             updateUiOnThread("System Ready", "Point camera at face.");
             return;
         }
@@ -688,14 +642,11 @@ public class MainActivity extends AppCompatActivity {
         Face bestFace = null;
 
         if (faces.isEmpty()) {
-            // No faces detected, reset UI and stop.
             currentBestMatch = "Scanning...";
             updateUiOnThread("System Ready", "Point camera at face.");
-            runOnUiThread(() -> overlayView.setFaces(new ArrayList<>())); // Clear any old boxes
+            runOnUiThread(() -> overlayView.setFaces(new ArrayList<>()));
             return;
         } else if (faces.size() > 1) {
-            // --- THIS IS THE NEW LOGIC FOR MULTIPLE FACES ---
-            // Find the face closest to the center of the preview.
             float minDistance = Float.MAX_VALUE;
             int screenCenterX = previewView.getWidth() / 2;
             int screenCenterY = previewView.getHeight() / 2;
@@ -713,29 +664,23 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
         } else {
-            // Only one face was detected, so it's the best one.
             bestFace = faces.get(0);
         }
 
         if (bestFace == null) {
-            // If no best face was determined, stop.
             return;
         }
 
-        // --- FROM HERE ON, WE USE 'bestFace' FOR EVERYTHING ---
-
         if (bluetoothService == null || !bluetoothService.isConnected()) {
-            // Stop the camera immediately
             if (cameraExecutor != null) {
                 cameraExecutor.shutdownNow();
                 cameraExecutor = null;
             }
             runOnUiThread(() -> statusTextView.setText("Door Lock disconnected.\nFace Recognition stopped."));
             Log.w(TAG, "Door Lock disconnected.\nStopping camera and face recognition.");
-            return; // Exit the method, no further processing
+            return;
         }
 
-        // 1. PERFORM QUALITY CHECKS ON THE BEST FACE
         Float leftEyeOpenProb = bestFace.getLeftEyeOpenProbability();
         Float rightEyeOpenProb = bestFace.getRightEyeOpenProbability();
         if ((leftEyeOpenProb != null && leftEyeOpenProb < 0.4) || (rightEyeOpenProb != null && rightEyeOpenProb < 0.4)) {
@@ -752,7 +697,6 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        // 2. ALIGN AND RECOGNIZE THE BEST FACE
         String currentBestFrameMatch = "Scanning...";
         float bestDist = Float.MAX_VALUE;
         List<FaceOverlayView.FaceGraphic> graphics = new ArrayList<>();
@@ -780,22 +724,17 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        // 3. CREATE THE GRAPHIC FOR ONLY THE BEST FACE
         String label = currentBestFrameMatch;
         if (!currentBestFrameMatch.equals("Scanning...") && !currentBestFrameMatch.equals("Unknown")) {
-            label = String.format(Locale.US, "%s (%.2f)", currentBestFrameMatch, bestDist);
+            label = currentBestFrameMatch;
         }
         graphics.add(new FaceOverlayView.FaceGraphic(bestFace.getBoundingBox(), label, bestDist));
 
-        // --- THE REST OF YOUR EXISTING LOGIC STAYS THE SAME ---
         this.currentBestMatch = currentBestFrameMatch;
 
         String finalMessage = "";
         String countdownMessage = "";
 
-        // (All your existing if/else logic for states like isAwaitingLockConfirmation, isDoorLocked, etc. goes here, unchanged)
-        // ...
-        // The caret position was here, so your existing logic starts from here
         if (isAwaitingLockConfirmation || isAwaitingUnlockConfirmation) {
 
             String authorizedName = isAwaitingLockConfirmation ? authorizedLocker : stableMatchName;
@@ -813,7 +752,6 @@ public class MainActivity extends AppCompatActivity {
             updateStabilityState(currentBestFrameMatch);
 
             if (stableMatchCount >= STABILITY_FRAMES_NEEDED) {
-
                 boolean isLockerIdentityConfirmed = !stableMatchName.equals("Unknown") &&
                         !stableMatchName.equals("Scanning...") &&
                         stableMatchName.equals(currentBestMatch);
@@ -867,7 +805,7 @@ public class MainActivity extends AppCompatActivity {
                     stableMatchCount = 0;
 
                     startConfirmationTimer(false);
-                    startVisualCountdown("Unlock", stableMatchName);
+                    startVisualCountdown("Unlock", authorizedUnlocker);
 
                 } else {
                     finalMessage = "Access Denied";
@@ -883,17 +821,15 @@ public class MainActivity extends AppCompatActivity {
                 countdownMessage = "Scanning for faculty...";
             }
         } else {
-            finalMessage = "Access Granted: " + authorizedUnlocker;
+            finalMessage = "Access Granted: " +  lastRecognizedFace;
             countdownMessage = "Door UNLOCKED. Choose options below.";
         }
-        // ... until the end of the method
 
         updateUiOnThread(finalMessage, countdownMessage);
 
         overlayView.setImageSourceInfo(inputImage.getWidth(), inputImage.getHeight(), true);
         runOnUiThread(() -> overlayView.setFaces(graphics));
     }
-
 
     private synchronized void updateStabilityState(String newMatch) {
         if (!newMatch.equals(lastMatchName)) {
@@ -929,6 +865,7 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
+
     private void normalizeEmbedding(float[] emb) {
         float norm = 0;
         for (float v : emb) norm += v * v;
@@ -944,7 +881,6 @@ public class MainActivity extends AppCompatActivity {
             String json = readStreamToString(is);
             is.close();
 
-            // Parse JSON as Map<String, List<List<Double>>> first
             Map<String, List<List<Double>>> temp = new Gson().fromJson(
                     json,
                     new TypeToken<Map<String, List<List<Double>>>>() {}.getType()
@@ -995,7 +931,6 @@ public class MainActivity extends AppCompatActivity {
 
                 if (embeddingsArray.length() == 0) continue;
 
-                // Store all embeddings in facultyEmbeddings
                 List<float[]> allEmbeddings = new ArrayList<>();
                 for (int i = 0; i < embeddingsArray.length(); i++) {
                     JSONArray arr = embeddingsArray.getJSONArray(i);
@@ -1007,7 +942,6 @@ public class MainActivity extends AppCompatActivity {
                 }
                 facultyEmbeddings.put(facultyName, allEmbeddings);
 
-                // Compute the average embedding for KNOWN_FACE_EMBEDDINGS
                 int embSize = allEmbeddings.get(0).length;
                 float[] avgEmb = new float[embSize];
                 for (float[] emb : allEmbeddings) {
@@ -1019,7 +953,6 @@ public class MainActivity extends AppCompatActivity {
                     avgEmb[j] /= allEmbeddings.size();
                 }
 
-                // Put only one key per person
                 KNOWN_FACE_EMBEDDINGS.put(facultyName, avgEmb);
             }
 
@@ -1081,7 +1014,6 @@ public class MainActivity extends AppCompatActivity {
                 " | Mean Inter = " + meanInter +
                 " | Computed Threshold = " + threshold);
 
-        // Safety check (if somehow it fails)
         if (threshold < 0.3f || threshold > 1.3f) threshold = 0.9f;
 
         return threshold;
@@ -1090,7 +1022,7 @@ public class MainActivity extends AppCompatActivity {
     private float simulateNoiseDistance(float[] emb) {
         float[] noisy = emb.clone();
         for (int i = 0; i < noisy.length; i++) {
-            noisy[i] += (Math.random() - 0.5f) * 0.02f; // small random noise
+            noisy[i] += (Math.random() - 0.5f) * 0.02f;
         }
         return FaceNet.distance(emb, noisy);
     }
@@ -1156,7 +1088,6 @@ public class MainActivity extends AppCompatActivity {
 
             Log.d(TAG, "JSON content snippet: " + json.substring(0, Math.min(json.length(), 200)) + "...");
 
-            // Try parsing as Map<String, List<List<Double>>>
             Map<String, List<List<Double>>> temp = new Gson().fromJson(
                     json,
                     new TypeToken<Map<String, List<List<Double>>>>(){}.getType()
@@ -1184,11 +1115,59 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @Override
-    public void onBackPressed() {
-        Intent intent = new Intent(MainActivity.this, HomeActivity.class);
-        startActivity(intent);
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
 
-        super.onBackPressed();
+        if (requestCode == REQ_ACTION && resultCode == RESULT_OK && data != null) {
+            String action = data.getStringExtra(ActionActivity.EXTRA_ACTION);
+
+            if (ActionActivity.ACTION_TAKE_BREAK.equals(action)) {
+                onTakeBreakClicked(null);
+
+            } else if (ActionActivity.ACTION_END_CLASS.equals(action)) {
+
+                if (!isDoorUnlocker(authorizedUnlocker)) {
+                    Intent intent = new Intent(MainActivity.this, DashboardActivity.class);
+                    intent.putExtra("profName", authorizedUnlocker);
+                    intent.putExtra("status", "Only the faculty who unlocked the door can end the class.");
+                    startActivity(intent);
+                    finish();
+                    return;
+                }
+
+                onEndClassClicked(null);
+
+            } else if (ActionActivity.ACTION_RESUME_CLASS.equals(action)) {
+                Intent intent = new Intent(MainActivity.this, DashboardActivity.class);
+                intent.putExtra("profName", authorizedUnlocker);
+                intent.putExtra("status", "Status: In Class");
+                startActivity(intent);
+                finish();
+            }
+        }
+    }
+
+
+    private void saveStatus(String status) {
+        getSharedPreferences("faculty_state", MODE_PRIVATE)
+                .edit()
+                .putString("status", status)
+                .apply();
+    }
+
+
+    @SuppressWarnings("MissingSuperCall")
+    @Override
+    public void onBackPressed() {
+        if (authorizedUnlocker == null) {
+            Toast.makeText(this, "You must scan a face first.", Toast.LENGTH_SHORT).show();
+        } else {
+            Intent intent = new Intent(MainActivity.this, DashboardActivity.class);
+            intent.putExtra("profName", authorizedUnlocker);
+            intent.putExtra("status", "In Class");
+            startActivity(intent);
+            finish();
+        }
     }
 
     @Override
@@ -1209,6 +1188,23 @@ public class MainActivity extends AppCompatActivity {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 initializeSystem();
             } else {
+                finish();
+            }
+        }
+
+        if (requestCode == REQUEST_BLUETOOTH_PERMISSION) {
+            if (grantResults.length > 0 &&
+                    grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+
+                Log.d("Bluetooth", "Bluetooth permission granted");
+                recreate();
+
+            } else {
+                Toast.makeText(
+                        this,
+                        "Bluetooth permission is required to connect to the Door Lock",
+                        Toast.LENGTH_LONG
+                ).show();
                 finish();
             }
         }

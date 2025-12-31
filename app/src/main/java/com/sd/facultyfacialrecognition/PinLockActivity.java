@@ -1,6 +1,7 @@
 package com.sd.facultyfacialrecognition;
 
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.util.Log;
 import android.widget.Button;
@@ -19,16 +20,11 @@ import java.util.Locale;
 import java.util.Map;
 
 public class PinLockActivity extends AppCompatActivity {
-
     private EditText editTextPin;
     private Button buttonSubmit, buttonSetPin;
-
     private static final String DEFAULT_PIN = "1234";
     private String currentPin = DEFAULT_PIN;
-
-    // Database URL
     private final String DATABASE_URL = "https://facultyfacialrecognition-default-rtdb.asia-southeast1.firebasedatabase.app/";
-
     private DatabaseReference pinRef;
 
     @Override
@@ -40,7 +36,6 @@ public class PinLockActivity extends AppCompatActivity {
         buttonSubmit = findViewById(R.id.buttonSubmit);
         buttonSetPin = findViewById(R.id.buttonSetPin);
 
-        // Initialize FirebaseDatabase with URL
         FirebaseDatabase database = FirebaseDatabase.getInstance(DATABASE_URL);
         pinRef = database.getReference("system_settings").child("admin_pin");
 
@@ -48,9 +43,12 @@ public class PinLockActivity extends AppCompatActivity {
 
         buttonSubmit.setOnClickListener(v -> handlePinSubmit());
         buttonSetPin.setOnClickListener(v -> openSetPinDialog());
+
+        SharedPreferences prefs = getSharedPreferences("app_state", MODE_PRIVATE);
+        String lastActivity = prefs.getString("last_activity", null);
+
     }
 
-    // ---------------- Load PIN ----------------
     private void loadPinFromDatabase() {
         pinRef.get().addOnCompleteListener(task -> {
             if (task.isSuccessful()) {
@@ -67,7 +65,6 @@ public class PinLockActivity extends AppCompatActivity {
         });
     }
 
-    // ---------------- Submit PIN ----------------
     private void handlePinSubmit() {
         String enteredPin = editTextPin.getText().toString().trim();
 
@@ -87,7 +84,6 @@ public class PinLockActivity extends AppCompatActivity {
         }
     }
 
-    // ---------------- Set New PIN ----------------
     private void openSetPinDialog() {
         EditText inputCurrent = new EditText(this);
         inputCurrent.setHint("Enter current PIN");
@@ -137,7 +133,6 @@ public class PinLockActivity extends AppCompatActivity {
                 .show();
     }
 
-    // ---------------- Save PIN ----------------
     private void savePin(String newPin) {
         Map<String, Object> data = new HashMap<>();
         data.put("pin", newPin);
@@ -154,8 +149,6 @@ public class PinLockActivity extends AppCompatActivity {
                 });
     }
 
-    // ---------------- Log Access ----------------
-    // ---------------- Log Access (overwrite latest) ----------------
     private void logAccess() {
         try {
             FirebaseDatabase database = FirebaseDatabase.getInstance(DATABASE_URL);
@@ -166,7 +159,6 @@ public class PinLockActivity extends AppCompatActivity {
             data.put("pin", currentPin);
             data.put("timestamp", timestamp);
 
-            // Overwrite the "Latest" child instead of pushing new nodes
             DatabaseReference logRef = database.getReference("access_to_database_logs").child("Latest");
             logRef.setValue(data)
                     .addOnSuccessListener(aVoid -> Log.d("PinLockDebug", "Latest access updated"))
@@ -175,6 +167,14 @@ public class PinLockActivity extends AppCompatActivity {
         } catch (Exception e) {
             Log.e("PinLockDebug", "Database initialization error", e);
         }
+    }
+
+    @SuppressWarnings("MissingSuperCall")
+    @Override
+    public void onBackPressed() {
+        Intent intent = new Intent(PinLockActivity.this, HomeActivity.class);
+        startActivity(intent);
+        finish();
     }
 
 }

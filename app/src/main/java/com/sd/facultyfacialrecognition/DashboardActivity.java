@@ -2,6 +2,7 @@ package com.sd.facultyfacialrecognition;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.widget.Button;
 import android.widget.TextView;
@@ -13,49 +14,53 @@ public class DashboardActivity extends AppCompatActivity {
     private TextView statusText;
     private Button scanAgainButton;
     private String profName;
+    private String authorizedUnlocker;
+    private SharedPreferences prefs;
+
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_dashboard);
 
-        profName = getIntent().getStringExtra("profName");
-
         welcomeText = findViewById(R.id.text_welcome);
         statusText = findViewById(R.id.text_status);
         scanAgainButton = findViewById(R.id.btn_scan_again);
 
-        welcomeText.setText("Welcome, " + profName);
+        Intent intent = getIntent();
+        String profNameFromIntent = intent.getStringExtra("profName");
+        String statusFromIntent = intent.getStringExtra("status");
 
-        String status = getIntent().getStringExtra("status");
-        if (status == null) status = "Status: In Class";
+        SharedPreferences prefs = getSharedPreferences("faculty_state", MODE_PRIVATE);
+
+        String profName = profNameFromIntent != null
+                ? profNameFromIntent
+                : prefs.getString("authorizedUnlocker", "Professor");
+
+        String status = statusFromIntent != null
+                ? statusFromIntent
+                : "Status: In Class\n\nScan Your Face Again to Take A Break or End Class.";
+
+
+        welcomeText.setText(profName != null ? "Welcome, " + profName : "Welcome, Professor");
         statusText.setText(status);
 
         scanAgainButton.setOnClickListener(v -> {
-            Intent intent = new Intent(DashboardActivity.this, MainActivity.class);
-            intent.putExtra("mode", "rescan");
-            intent.putExtra("profName", profName);
-            if (statusText.getText().toString().contains("on break")) {
-                intent.putExtra("from_break", true);
-            }
-            startActivity(intent);
+            if (prefs.getString("authorizedUnlocker", null) == null) return;
+
+            Intent newIntent = new Intent(DashboardActivity.this, MainActivity.class);
+            newIntent.putExtra("mode", "rescan");
+            newIntent.putExtra("profName", prefs.getString("authorizedUnlocker", null));
+            startActivity(newIntent);
             finish();
         });
-
     }
 
+
+
+    @SuppressWarnings("MissingSuperCall")
     @Override
     public void onBackPressed() {
-        Intent intent = new Intent(DashboardActivity.this, DashboardActivity.class);
-
-        // Pass the current data so nothing resets
-        intent.putExtra("profName", profName);
-        intent.putExtra("status", statusText.getText().toString());
-
-        startActivity(intent);
-        finish();
-
-        super.onBackPressed(); // to satisfy Android Studio (won’t break anything)
     }
 
 }

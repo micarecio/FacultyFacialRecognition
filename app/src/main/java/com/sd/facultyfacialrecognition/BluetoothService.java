@@ -19,7 +19,7 @@ import java.util.UUID;
 public class BluetoothService {
 
     private static final String TAG = "BluetoothService";
-    private static final UUID MY_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB"); // SPP UUID
+    private static final UUID MY_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
 
     private final BluetoothDevice device;
     private final Context context;
@@ -31,17 +31,15 @@ public class BluetoothService {
         this.device = device;
     }
 
-    // Check if permission is granted (Android 12+)
     private boolean hasBluetoothPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             return ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT)
                     == PackageManager.PERMISSION_GRANTED;
         } else {
-            return true; // No runtime permission required below Android 12
+            return true;
         }
     }
 
-    // Connect to the Bluetooth device
     public boolean connect() {
         if (!hasBluetoothPermission()) {
             Log.e(TAG, "BLUETOOTH_CONNECT permission not granted");
@@ -50,7 +48,7 @@ public class BluetoothService {
 
         try {
             socket = device.createRfcommSocketToServiceRecord(MY_UUID);
-            BluetoothAdapter.getDefaultAdapter().cancelDiscovery(); // Cancel discovery before connecting
+            BluetoothAdapter.getDefaultAdapter().cancelDiscovery();
             socket.connect();
             outputStream = socket.getOutputStream();
             Log.d(TAG, "Bluetooth connected successfully");
@@ -64,13 +62,12 @@ public class BluetoothService {
         }
     }
 
-    // Send a string command to the device
     public void sendDoorStatus(String status) {
         if (outputStream == null || !isConnected()) return;
 
         new Thread(() -> {
             try {
-                String message = status + "\n"; // newline important
+                String message = status + "\n";
                 outputStream.write(message.getBytes(StandardCharsets.UTF_8));
                 outputStream.flush();
                 Log.d(TAG, "Sent message: " + message.trim());
@@ -80,7 +77,6 @@ public class BluetoothService {
         }).start();
     }
 
-    // Disconnect safely
     public void disconnect() {
         try {
             if (outputStream != null) {
@@ -99,7 +95,6 @@ public class BluetoothService {
         }
     }
 
-    // Optional helper to check if connected
     public boolean isConnected() {
         return socket != null && socket.isConnected();
     }
