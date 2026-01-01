@@ -32,6 +32,7 @@ import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
 import com.google.common.util.concurrent.ListenableFuture;
+import com.google.firebase.firestore.DocumentSnapshot;
 import com.google.firebase.firestore.FirebaseFirestore;
 import com.google.mlkit.vision.common.InputImage;
 import com.google.mlkit.vision.face.Face;
@@ -66,6 +67,7 @@ import com.google.gson.reflect.TypeToken;
 
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.Calendar;
 
 import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.FirebaseDatabase;
@@ -226,6 +228,55 @@ public class MainActivity extends AppCompatActivity {
         return null;
     }
 
+    public static class TimeSlot {
+        public List<String> startTimes;
+        public List<String> endTimes;
+
+        public TimeSlot(List<String> startTimes, List<String> endTimes) {
+            this.startTimes = startTimes;
+            this.endTimes = endTimes;
+        }
+    }
+
+    private String getTodayKey() {
+        Calendar calendar = Calendar.getInstance();
+        int dayOfWeek = calendar.get(Calendar.DAY_OF_WEEK);
+        String[] days = {"sun", "mon", "tue", "wed", "thu", "fri", "sat"};
+        return days[dayOfWeek - 1];
+    }
+
+    private String getCurrentTime() {
+        SimpleDateFormat sdf = new SimpleDateFormat("HH:mm", Locale.getDefault());
+        return sdf.format(Calendar.getInstance().getTime());
+    }
+
+    private boolean isWithinTimeRange(String currentTime, String startTime, String endTime) {
+        try {
+            SimpleDateFormat sdf = new SimpleDateFormat("HH:mm", Locale.getDefault());
+            Date current = sdf.parse(currentTime);
+            Date start = sdf.parse(startTime);
+            Date end = sdf.parse(endTime);
+            return current != null && start != null && end != null &&
+                    current.compareTo(start) >= 0 && current.compareTo(end) <= 0;
+        } catch (Exception e) {
+            e.printStackTrace();
+            return false;
+        }
+    }
+
+    private boolean isAllowedNow(TimeSlot timeSlot) {
+        String currentTime = getCurrentTime();
+        if (timeSlot == null || timeSlot.startTimes == null || timeSlot.endTimes == null) return false;
+
+        for (int i = 0; i < timeSlot.startTimes.size(); i++) {
+            String start = timeSlot.startTimes.get(i);
+            String end = timeSlot.endTimes.get(i);
+            if (start.isEmpty() || end.isEmpty()) continue;
+            if (isWithinTimeRange(currentTime, start, end)) return true;
+        }
+        return false;
+    }
+
     private void initializeSystem() {
         try {
             faceNet = new FaceNet(this, "facenet.tflite");
@@ -377,59 +428,96 @@ public class MainActivity extends AppCompatActivity {
     }
     private void handleUnlockConfirmation() {
 
+        if ("Scanning...".equals(stableMatchName)) return;
 
-        SharedPreferences prefs = getSharedPreferences("DoorPrefs", MODE_PRIVATE);
-        String savedFirstUnlocker = prefs.getString("lastRecognizedFace", null);
+        FirebaseFirestore db = FirebaseFirestore.getInstance();
+        String facultyName = stableMatchName;
 
-        if (savedFirstUnlocker == null && !"Scanning...".equals(stableMatchName)) {
-            lastRecognizedFace = stableMatchName;
+        db.collection("FacultySchedules")
+                .whereEqualTo("name", facultyName)
+                .get()
+                .addOnSuccessListener(queryDocumentSnapshots -> {
+                    if (!queryDocumentSnapshots.isEmpty()) {
+                        DocumentSnapshot doc = queryDocumentSnapshots.getDocuments().get(0);
+                        Boolean enabled = doc.getBoolean("enabled");
+                        if (enabled == null || !enabled) enabled = false;
 
-            prefs.edit().putString("lastRecognizedFace", lastRecognizedFace).apply();
+                        if (!enabled) {
+                            Toast.makeText(this, "Access Denied! Schedule Disabled.", Toast.LENGTH_SHORT).show();
+                            Log.d("DoorDebug", "Access denied for " + facultyName + ", schedule disabled.");
+                            return;
+                        }
 
-            Log.d("DoorDebug", "First scan — lastRecognizedFace set to: " + lastRecognizedFace);
+                        Map<String, Object> schedule = (Map<String, Object>) doc.get("schedule");
+                        String todayKey = getTodayKey();
 
-            isDoorLocked = false;
-            isAwaitingUnlockConfirmation = false;
-            unlockProcessed = true;
+                        if (!schedule.containsKey(todayKey)) {
+                            Toast.makeText(this, "Access Denied! No Schedule Today.", Toast.LENGTH_SHORT).show();
+                            Log.d("DoorDebug", "Access denied for " + facultyName + ", no schedule today.");
+                            return;
+                        }
 
-            Log.d("DoorDebug", "Door unlocked by first scan: " + lastRecognizedFace);
+                        Map<String, Object> todaySchedule = (Map<String, Object>) schedule.get(todayKey);
+                        List<String> startTimes = (List<String>) todaySchedule.get("start");
+                        List<String> endTimes = (List<String>) todaySchedule.get("end");
 
-            sendBluetoothStatus("UNLOCKED");
-            updateDoorStatus(lastRecognizedFace, "In Class", "UNLOCKED");
+                        if (!isAllowedNow(new TimeSlot(startTimes, endTimes))) {
+                            Toast.makeText(this, "Access Denied! Not your scheduled time.", Toast.LENGTH_SHORT).show();
+                            Log.d("DoorDebug", "Access denied for " + facultyName + " at " + getCurrentTime());
+                            return;
+                        }
 
-            if (cameraExecutor != null) cameraExecutor.shutdown();
+                        SharedPreferences prefs = getSharedPreferences("DoorPrefs", MODE_PRIVATE);
+                        String savedFirstUnlocker = prefs.getString("lastRecognizedFace", null);
 
-            Intent intent = new Intent(this, DashboardActivity.class);
-            intent.putExtra("profName", lastRecognizedFace);
-            startActivity(intent);
+                        if (savedFirstUnlocker == null) {
+                            lastRecognizedFace = stableMatchName;
+                            prefs.edit().putString("lastRecognizedFace", lastRecognizedFace).apply();
+                            Log.d("DoorDebug", "First scan — lastRecognizedFace set to: " + lastRecognizedFace);
+                            isDoorLocked = false;
+                            isAwaitingUnlockConfirmation = false;
+                            unlockProcessed = true;
+                            Log.d("DoorDebug", "Door unlocked by first scan: " + lastRecognizedFace);
+                            sendBluetoothStatus("UNLOCKED");
+                            updateDoorStatus(lastRecognizedFace, "In Class", "UNLOCKED");
+                            if (cameraExecutor != null) cameraExecutor.shutdown();
+                            Intent intent = new Intent(this, DashboardActivity.class);
+                            intent.putExtra("profName", lastRecognizedFace);
+                            startActivity(intent);
+                            debugState("End of handleUnlockConfirmation - door unlocked");
+                            return;
+                        }
 
-            debugState("End of handleUnlockConfirmation - door unlocked");
-            return;
-        }
+                        if (savedFirstUnlocker != null) {
+                            lastRecognizedFace = savedFirstUnlocker;
+                            authorizedUnlocker = stableMatchName;
+                            Log.d("DoorDebug", "Rescan — authorizedUnlocker updated to: " + authorizedUnlocker);
+                            debugState("Rescan - accessing ActionActivity");
 
-        if (savedFirstUnlocker != null) {
-            lastRecognizedFace = savedFirstUnlocker;
-            authorizedUnlocker = stableMatchName;
+                            if (!lastRecognizedFace.equals(authorizedUnlocker)) {
+                                Toast.makeText(this, "Only " + lastRecognizedFace + " can take actions.", Toast.LENGTH_SHORT).show();
+                                Intent intent = new Intent(this, DashboardActivity.class);
+                                intent.putExtra("profName", lastRecognizedFace);
+                                intent.putExtra("status", "Access denied. Please rescan your face.");
+                                startActivity(intent);
+                                return;
+                            }
 
-            Log.d("DoorDebug", "Rescan — authorizedUnlocker updated to: " + authorizedUnlocker);
+                            Intent intent = new Intent(this, ActionActivity.class);
+                            intent.putExtra("currentFaculty", lastRecognizedFace);
+                            startActivityForResult(intent, REQ_ACTION);
+                        }
 
-            debugState("Rescan - accessing ActionActivity");
-
-            if (!lastRecognizedFace.equals(authorizedUnlocker)) {
-                Toast.makeText(this, "Only " + lastRecognizedFace + " can take actions.", Toast.LENGTH_SHORT).show();
-                Intent intent = new Intent(this, DashboardActivity.class);
-                intent.putExtra("profName", lastRecognizedFace);
-                intent.putExtra("status", "Access denied. Please rescan your face.");
-                startActivity(intent);
-                return;
-            }
-
-            Intent intent = new Intent(this, ActionActivity.class);
-            intent.putExtra("currentFaculty", lastRecognizedFace);
-            startActivityForResult(intent, REQ_ACTION);
-        }
+                    } else {
+                        Toast.makeText(this, "Access Denied! No schedule found.", Toast.LENGTH_SHORT).show();
+                        Log.d("DoorDebug", "Access denied for " + facultyName + ", no schedule found.");
+                    }
+                })
+                .addOnFailureListener(e -> {
+                    Toast.makeText(this, "Error accessing schedule", Toast.LENGTH_SHORT).show();
+                    Log.e("DoorDebug", "Firestore error: " + e.getMessage());
+                });
     }
-
 
     private void handleLockConfirmation() {
         if (lastRecognizedFace.equals("Scanning...")) {
