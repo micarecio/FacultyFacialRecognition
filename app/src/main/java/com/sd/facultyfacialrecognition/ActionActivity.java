@@ -36,9 +36,9 @@ public class ActionActivity extends AppCompatActivity {
         TextView textActionPrompt = findViewById(R.id.text_action_prompt);
 
         if (lastRecognizedFace != null) {
-            textActionPrompt.setText("Hello, " + lastRecognizedFace);
+            textActionPrompt.setText("Hello, " + lastRecognizedFace + "!");
         } else {
-            textActionPrompt.setText("Hello, Professor");
+            textActionPrompt.setText("Hello, Professor!");
         }
 
         btnTakeBreak.setOnClickListener(v -> {

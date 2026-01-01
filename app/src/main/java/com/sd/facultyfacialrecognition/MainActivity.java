@@ -88,7 +88,7 @@ public class MainActivity extends AppCompatActivity {
     private final Map<String, float[]> KNOWN_FACE_EMBEDDINGS = new HashMap<>();
     private Map<String, List<float[]>> facultyEmbeddings = new HashMap<>();
     private float dynamicThreshold = 0.66f;
-    private static final int STABILITY_FRAMES_NEEDED = 7;
+    private static final int STABILITY_FRAMES_NEEDED = 5;
     private static final long UNLOCK_COOLDOWN_MILLIS = 10000;
     private static final long CONFIRMATION_TIMEOUT_MILLIS = 10000;
     private static final int VISUAL_COUNTDOWN_SECONDS = 5;
@@ -449,7 +449,7 @@ public class MainActivity extends AppCompatActivity {
         sendBluetoothStatus("LOCKED");
         Log.d("DoorLockDebug", "Door locked by: " + authorizedLocker);
 
-        updateDoorStatus(authorizedLocker, "End Class", "LOCKED");
+        updateDoorStatus(lastRecognizedFace, "End Class", "LOCKED");
         updateUiOnThread("System Locked", "Door secured. Cooldown active.");
     }
 
@@ -484,11 +484,11 @@ public class MainActivity extends AppCompatActivity {
             Toast.makeText(this, "Only " + lastRecognizedFace + " may take a break.", Toast.LENGTH_SHORT).show();
             return;
         }
-        updateDoorStatus(authorizedUnlocker, "On Break", "UNLOCKED");
+        updateDoorStatus(lastRecognizedFace, "On Break", "UNLOCKED");
 
         Intent intent = new Intent(this, DashboardActivity.class);
         intent.putExtra("profName", lastRecognizedFace);
-        intent.putExtra("status", "Status: On Break\n\nScan Your Face Again to Resume Class.");
+        intent.putExtra("status", "Status: On Break\n\nScan Your Face Again to Choose Actions.\n( Resume Class / Take A Break / End Class )");
         startActivity(intent);
         finish();
     }
@@ -496,7 +496,7 @@ public class MainActivity extends AppCompatActivity {
     public void onBreakDoneClicked(View view) {
         if (authorizedUnlocker == null) return;
         isReturningFromBreak = true;
-        updateDoorStatus(authorizedUnlocker, "In Class", "UNLOCKED");
+        updateDoorStatus(lastRecognizedFace, "In Class", "UNLOCKED");
 
         Intent intent = new Intent(this, DashboardActivity.class);
         intent.putExtra("profName", authorizedUnlocker);
@@ -1138,6 +1138,7 @@ public class MainActivity extends AppCompatActivity {
                 onEndClassClicked(null);
 
             } else if (ActionActivity.ACTION_RESUME_CLASS.equals(action)) {
+                updateDoorStatus(lastRecognizedFace, "In Class", "UNLOCKED");
                 Intent intent = new Intent(MainActivity.this, DashboardActivity.class);
                 intent.putExtra("profName", authorizedUnlocker);
                 intent.putExtra("status", "Status: In Class");

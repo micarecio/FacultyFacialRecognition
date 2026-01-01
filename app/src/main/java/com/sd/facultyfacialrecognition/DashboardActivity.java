@@ -39,10 +39,10 @@ public class DashboardActivity extends AppCompatActivity {
 
         String status = statusFromIntent != null
                 ? statusFromIntent
-                : "Status: In Class\n\nScan Your Face Again to Take A Break or End Class.";
+                : "Status: In Class\n\nScan Your Face Again to Choose Actions.\n( Resume Class / Take A Break / End Class )";
 
 
-        welcomeText.setText(profName != null ? "Welcome, " + profName : "Welcome, Professor");
+        welcomeText.setText(profName != null ? "Welcome, " + profName + "!" : "Welcome, Professor!");
         statusText.setText(status);
 
         scanAgainButton.setOnClickListener(v -> {

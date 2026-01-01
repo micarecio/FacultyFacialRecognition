@@ -44,7 +44,7 @@
             android:gravity="center"
             android:text="Engr."
             android:textColor="#FFFFFF"
-            android:textSize="28sp"/>
+            android:textSize="30sp"/>
 
         <TextView
             android:id="@+id/text_status"
@@ -52,7 +52,7 @@
             android:layout_height="wrap_content"
             android:text="Status:"
             android:fontFamily="@font/generalsans_semibold"
-            android:textSize="20sp"
+            android:textSize="28sp"
             android:textColor="#FFFFFF"
             android:layout_marginTop="20dp"
             android:gravity="center" />
