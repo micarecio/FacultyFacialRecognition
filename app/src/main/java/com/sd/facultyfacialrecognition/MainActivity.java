@@ -236,6 +236,13 @@ public class MainActivity extends AppCompatActivity {
             this.startTimes = startTimes;
             this.endTimes = endTimes;
         }
+
+        public String start;
+        public String end;
+        public TimeSlot(String start, String end) {
+            this.start = start;
+            this.end = end;
+        }
     }
 
     private String getTodayKey() {
@@ -264,17 +271,12 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private boolean isAllowedNow(TimeSlot timeSlot) {
+    private boolean isAllowedNow(String start, String end) {
         String currentTime = getCurrentTime();
-        if (timeSlot == null || timeSlot.startTimes == null || timeSlot.endTimes == null) return false;
-
-        for (int i = 0; i < timeSlot.startTimes.size(); i++) {
-            String start = timeSlot.startTimes.get(i);
-            String end = timeSlot.endTimes.get(i);
-            if (start.isEmpty() || end.isEmpty()) continue;
-            if (isWithinTimeRange(currentTime, start, end)) return true;
+        if (start == null || end == null || start.isEmpty() || end.isEmpty()) {
+            return false;
         }
-        return false;
+        return isWithinTimeRange(currentTime, start, end);
     }
 
     private void initializeSystem() {
@@ -363,7 +365,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private String lastRecognizedFace = "Scanning...";
-    
+
     private void updateDoorStatus(String facultyName, String facultyStatus, String doorStatus) {
         if (facultyName == null || facultyName.equals("Scanning...") || facultyName.equals("Unknown")) {
             Log.w("DoorDebug", "Skipping updateDoorStatus: invalid facultyName");
@@ -426,7 +428,7 @@ public class MainActivity extends AppCompatActivity {
         Log.d("DoorDebug", "isReturningFromBreak: " + isReturningFromBreak);
         Log.d("DoorDebug", "-------------------------------");
     }
-    private void handleUnlockConfirmation() {
+    private void handleUnlockConfirmation(String currentLab) {
 
         if ("Scanning...".equals(stableMatchName)) return;
 
@@ -439,29 +441,56 @@ public class MainActivity extends AppCompatActivity {
                 .addOnSuccessListener(queryDocumentSnapshots -> {
                     if (!queryDocumentSnapshots.isEmpty()) {
                         DocumentSnapshot doc = queryDocumentSnapshots.getDocuments().get(0);
+
                         Boolean enabled = doc.getBoolean("enabled");
                         if (enabled == null || !enabled) enabled = false;
 
                         if (!enabled) {
-                            Toast.makeText(this, "Access Denied! Schedule Disabled.", Toast.LENGTH_SHORT).show();
-                            Log.d("DoorDebug", "Access denied for " + facultyName + ", schedule disabled.");
+                            Toast.makeText(this, "Access Denied! Account Disabled.", Toast.LENGTH_SHORT).show();
+                            Log.d("DoorDebug", "Access denied for " + facultyName + ", account disabled.");
                             return;
                         }
 
                         Map<String, Object> schedule = (Map<String, Object>) doc.get("schedule");
                         String todayKey = getTodayKey();
 
-                        if (!schedule.containsKey(todayKey)) {
-                            Toast.makeText(this, "Access Denied! No Schedule Today.", Toast.LENGTH_SHORT).show();
+                        if (schedule == null || !schedule.containsKey(currentLab)) {
+                            Toast.makeText(this, "Access Denied! No access to " + currentLab, Toast.LENGTH_SHORT).show();
+                            Log.d("DoorDebug", "Access denied: " + facultyName + " has no schedule for " + currentLab);
+                            return;
+                        }
+
+                        Map<String, Object> labSchedule = (Map<String, Object>) schedule.get(currentLab);
+
+                        if (!labSchedule.containsKey(todayKey)) {
+                            Toast.makeText(this, "Access Denied! No schedule today.", Toast.LENGTH_SHORT).show();
                             Log.d("DoorDebug", "Access denied for " + facultyName + ", no schedule today.");
                             return;
                         }
 
-                        Map<String, Object> todaySchedule = (Map<String, Object>) schedule.get(todayKey);
+                        Map<String, Object> todaySchedule = (Map<String, Object>) labSchedule.get(todayKey);
+
                         List<String> startTimes = (List<String>) todaySchedule.get("start");
                         List<String> endTimes = (List<String>) todaySchedule.get("end");
 
-                        if (!isAllowedNow(new TimeSlot(startTimes, endTimes))) {
+                        if (startTimes == null || endTimes == null || startTimes.isEmpty() || endTimes.isEmpty()) {
+                            Toast.makeText(this, "Access Denied! Schedule is empty.", Toast.LENGTH_SHORT).show();
+                            Log.d("DoorDebug", "Access denied for " + facultyName + ", schedule empty.");
+                            return;
+                        }
+
+                        boolean allowedNow = false;
+                        for (int i = 0; i < startTimes.size(); i++) {
+                            String start = startTimes.get(i);
+                            String end = endTimes.get(i);
+
+                            if (isAllowedNow(start, end)) {
+                                allowedNow = true;
+                                break;
+                            }
+                        }
+
+                        if (!allowedNow) {
                             Toast.makeText(this, "Access Denied! Not your scheduled time.", Toast.LENGTH_SHORT).show();
                             Log.d("DoorDebug", "Access denied for " + facultyName + " at " + getCurrentTime());
                             return;
@@ -474,13 +503,17 @@ public class MainActivity extends AppCompatActivity {
                             lastRecognizedFace = stableMatchName;
                             prefs.edit().putString("lastRecognizedFace", lastRecognizedFace).apply();
                             Log.d("DoorDebug", "First scan — lastRecognizedFace set to: " + lastRecognizedFace);
+
                             isDoorLocked = false;
                             isAwaitingUnlockConfirmation = false;
                             unlockProcessed = true;
+
                             Log.d("DoorDebug", "Door unlocked by first scan: " + lastRecognizedFace);
                             sendBluetoothStatus("UNLOCKED");
                             updateDoorStatus(lastRecognizedFace, "In Class", "UNLOCKED");
+
                             if (cameraExecutor != null) cameraExecutor.shutdown();
+
                             Intent intent = new Intent(this, DashboardActivity.class);
                             intent.putExtra("profName", lastRecognizedFace);
                             startActivity(intent);
@@ -488,28 +521,26 @@ public class MainActivity extends AppCompatActivity {
                             return;
                         }
 
-                        if (savedFirstUnlocker != null) {
-                            lastRecognizedFace = savedFirstUnlocker;
-                            authorizedUnlocker = stableMatchName;
-                            Log.d("DoorDebug", "Rescan — authorizedUnlocker updated to: " + authorizedUnlocker);
-                            debugState("Rescan - accessing ActionActivity");
+                        lastRecognizedFace = savedFirstUnlocker;
+                        authorizedUnlocker = stableMatchName;
+                        Log.d("DoorDebug", "Rescan — authorizedUnlocker updated to: " + authorizedUnlocker);
+                        debugState("Rescan - accessing ActionActivity");
 
-                            if (!lastRecognizedFace.equals(authorizedUnlocker)) {
-                                Toast.makeText(this, "Only " + lastRecognizedFace + " can take actions.", Toast.LENGTH_SHORT).show();
-                                Intent intent = new Intent(this, DashboardActivity.class);
-                                intent.putExtra("profName", lastRecognizedFace);
-                                intent.putExtra("status", "Access denied. Please rescan your face.");
-                                startActivity(intent);
-                                return;
-                            }
-
-                            Intent intent = new Intent(this, ActionActivity.class);
-                            intent.putExtra("currentFaculty", lastRecognizedFace);
-                            startActivityForResult(intent, REQ_ACTION);
+                        if (!lastRecognizedFace.equals(authorizedUnlocker)) {
+                            Toast.makeText(this, "Only " + lastRecognizedFace + " can take actions.", Toast.LENGTH_SHORT).show();
+                            Intent intent = new Intent(this, DashboardActivity.class);
+                            intent.putExtra("profName", lastRecognizedFace);
+                            intent.putExtra("status", "Access denied. Please rescan your face.");
+                            startActivity(intent);
+                            return;
                         }
 
+                        Intent intent = new Intent(this, ActionActivity.class);
+                        intent.putExtra("currentFaculty", lastRecognizedFace);
+                        startActivityForResult(intent, REQ_ACTION);
+
                     } else {
-                        Toast.makeText(this, "Access Denied! No schedule found.", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(this, "Access Denied! No record found.", Toast.LENGTH_SHORT).show();
                         Log.d("DoorDebug", "Access denied for " + facultyName + ", no schedule found.");
                     }
                 })
@@ -619,7 +650,7 @@ public class MainActivity extends AppCompatActivity {
         stopVisualCountdown();
 
         if (isAwaitingLockConfirmation) handleLockConfirmation();
-        else if (isAwaitingUnlockConfirmation) handleUnlockConfirmation();
+        else if (isAwaitingUnlockConfirmation) handleUnlockConfirmation(currentLab);
     }
 
     public void onConfirmNoClicked(View view) {
