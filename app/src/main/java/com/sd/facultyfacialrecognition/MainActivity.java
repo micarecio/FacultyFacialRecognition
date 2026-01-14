@@ -90,9 +90,9 @@ public class MainActivity extends AppCompatActivity {
     private final Map<String, float[]> KNOWN_FACE_EMBEDDINGS = new HashMap<>();
     private Map<String, List<float[]>> facultyEmbeddings = new HashMap<>();
     private float dynamicThreshold = 0.66f;
-    private static final int STABILITY_FRAMES_NEEDED = 5;
-    private static final long UNLOCK_COOLDOWN_MILLIS = 1000;
-    private static final long CONFIRMATION_TIMEOUT_MILLIS = 1000;
+    private static final int STABILITY_FRAMES_NEEDED = 2;
+    private static final long UNLOCK_COOLDOWN_MILLIS = 100;
+    private static final long CONFIRMATION_TIMEOUT_MILLIS = 100;
     private static final int VISUAL_COUNTDOWN_SECONDS = 1;
     private String mode = "";
     private boolean isRescanModeActive = false;
@@ -429,6 +429,25 @@ public class MainActivity extends AppCompatActivity {
         Log.d("DoorDebug", "isReturningFromBreak: " + isReturningFromBreak);
         Log.d("DoorDebug", "-------------------------------");
     }
+
+    private void resetUnlockFlow() {
+        isAwaitingUnlockConfirmation = false;
+        isAwaitingLockConfirmation = false;
+        isAwaitingLockerRecognition = false;
+
+        stableMatchName = "Scanning...";
+        currentBestMatch = "Scanning...";
+        lastMatchName = "";
+
+        stableMatchCount = 0;
+        authorizedUnlocker = null;
+
+        stopConfirmationTimer();
+        stopVisualCountdown();
+
+        updateUiOnThread("System Ready", "Point camera at face.");
+    }
+
     private void handleUnlockConfirmation(String currentLab) {
 
         if ("Scanning...".equals(stableMatchName)) return;
@@ -449,6 +468,7 @@ public class MainActivity extends AppCompatActivity {
                         if (!enabled) {
                             Toast.makeText(this, "Access Denied! Account Disabled.", Toast.LENGTH_SHORT).show();
                             Log.d("DoorDebug", "Access denied for " + facultyName + ", account disabled.");
+                            resetUnlockFlow();
                             return;
                         }
 
@@ -458,6 +478,7 @@ public class MainActivity extends AppCompatActivity {
                         if (schedule == null || !schedule.containsKey(currentLab)) {
                             Toast.makeText(this, "Access Denied! No access to " + currentLab, Toast.LENGTH_SHORT).show();
                             Log.d("DoorDebug", "Access denied: " + facultyName + " has no schedule for " + currentLab);
+                            resetUnlockFlow();
                             return;
                         }
 
@@ -466,6 +487,7 @@ public class MainActivity extends AppCompatActivity {
                         if (!labSchedule.containsKey(todayKey)) {
                             Toast.makeText(this, "Access Denied! No schedule today.", Toast.LENGTH_SHORT).show();
                             Log.d("DoorDebug", "Access denied for " + facultyName + ", no schedule today.");
+                            resetUnlockFlow();
                             return;
                         }
 
@@ -494,6 +516,7 @@ public class MainActivity extends AppCompatActivity {
                         if (!allowedNow) {
                             Toast.makeText(this, "Access Denied! Not your scheduled time.", Toast.LENGTH_SHORT).show();
                             Log.d("DoorDebug", "Access denied for " + facultyName + " at " + getCurrentTime());
+                            resetUnlockFlow();
                             return;
                         }
 
@@ -543,6 +566,7 @@ public class MainActivity extends AppCompatActivity {
                     } else {
                         Toast.makeText(this, "Access Denied! No record found.", Toast.LENGTH_SHORT).show();
                         Log.d("DoorDebug", "Access denied for " + facultyName + ", no schedule found.");
+                        resetUnlockFlow();
                     }
                 })
                 .addOnFailureListener(e -> {
