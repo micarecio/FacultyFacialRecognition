@@ -7,7 +7,6 @@
     android:background="@drawable/background_azure"
     tools:context=".ActionActivity">
 
-    <!-- Background images -->
     <ImageView
         android:id="@+id/whole_logo_circuit"
         android:layout_width="800dp"

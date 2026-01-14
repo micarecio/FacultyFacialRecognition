@@ -91,9 +91,9 @@ public class MainActivity extends AppCompatActivity {
     private Map<String, List<float[]>> facultyEmbeddings = new HashMap<>();
     private float dynamicThreshold = 0.66f;
     private static final int STABILITY_FRAMES_NEEDED = 5;
-    private static final long UNLOCK_COOLDOWN_MILLIS = 10000;
-    private static final long CONFIRMATION_TIMEOUT_MILLIS = 10000;
-    private static final int VISUAL_COUNTDOWN_SECONDS = 5;
+    private static final long UNLOCK_COOLDOWN_MILLIS = 1000;
+    private static final long CONFIRMATION_TIMEOUT_MILLIS = 1000;
+    private static final int VISUAL_COUNTDOWN_SECONDS = 1;
     private String mode = "";
     private boolean isRescanModeActive = false;
 
@@ -303,16 +303,17 @@ public class MainActivity extends AppCompatActivity {
 
         confirmationRunnable = () -> {
             if (isLock) {
-                onConfirmNoClicked(null);
-                updateUiOnThread("Lock Timed Out", "Lock request cancelled due to inactivity.");
+                handleLockConfirmation();
+                updateUiOnThread("Lock Confirmed", "Lock executed automatically after countdown.");
             } else {
-                onConfirmNoClicked(null);
-                updateUiOnThread("Unlock Timed Out", "Unlock request cancelled due to inactivity.");
+                handleUnlockConfirmation(currentLab);
+                updateUiOnThread("Unlock Confirmed", "Unlock executed automatically after countdown.");
             }
         };
 
         confirmationHandler.postDelayed(confirmationRunnable, CONFIRMATION_TIMEOUT_MILLIS);
     }
+
 
     private void stopConfirmationTimer() {
         if (confirmationRunnable != null) {
@@ -645,37 +646,6 @@ public class MainActivity extends AppCompatActivity {
     }
 
 
-    public void onConfirmYesClicked(View view) {
-        stopConfirmationTimer();
-        stopVisualCountdown();
-
-        if (isAwaitingLockConfirmation) handleLockConfirmation();
-        else if (isAwaitingUnlockConfirmation) handleUnlockConfirmation(currentLab);
-    }
-
-    public void onConfirmNoClicked(View view) {
-        stopConfirmationTimer();
-        stopVisualCountdown();
-
-        if (isAwaitingLockConfirmation) {
-            isAwaitingLockConfirmation = false;
-            isAwaitingLockerRecognition = false;
-            authorizedLocker = null;
-            updateUiOnThread("Access Granted: " +  lastRecognizedFace, "Lock cancelled by user. Door is UNLOCKED.");
-        } else if (isAwaitingUnlockConfirmation) {
-            isAwaitingUnlockConfirmation = false;
-            updateUiOnThread("Access Denied", "Unlock cancelled by user. Awaiting recognition.");
-        }
-
-        stableMatchCount = 0;
-        stableMatchName = "Scanning...";
-        currentBestMatch = "Scanning...";
-    }
-
-
-
-
-
     private boolean allPermissionsGranted() {
         return ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
                 == PackageManager.PERMISSION_GRANTED;
@@ -973,14 +943,6 @@ public class MainActivity extends AppCompatActivity {
         runOnUiThread(() -> {
             statusTextView.setText(status);
             countdownTextView.setText(countdown);
-
-            if (isAwaitingLockConfirmation || isAwaitingUnlockConfirmation) {
-                confirmYesButton.setVisibility(View.VISIBLE);
-                confirmNoButton.setVisibility(View.VISIBLE);
-            } else {
-                confirmYesButton.setVisibility(View.GONE);
-                confirmNoButton.setVisibility(View.GONE);
-            }
         });
     }
 
