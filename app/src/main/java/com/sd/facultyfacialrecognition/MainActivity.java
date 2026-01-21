@@ -335,16 +335,16 @@ public class MainActivity extends AppCompatActivity {
                 if (confirmationTimeRemaining > 0) {
                     String name = isAwaitingLockConfirmation ? authorizedLocker : stableMatchName;
 
-                    updateUiOnThread("Confirm " + currentAction + " Identity",
-                            "Is this you: " + name + "?\nAction auto-cancels in " + (CONFIRMATION_TIMEOUT_MILLIS / 1000) + "s (Visual countdown: " + confirmationTimeRemaining + "s).");
+//                    updateUiOnThread("Confirm " + currentAction + " Identity",
+//                            "Is this you: " + name + "?\nAction auto-cancels in " + (CONFIRMATION_TIMEOUT_MILLIS / 1000) + "s (Visual countdown: " + confirmationTimeRemaining + "s).");
 
                     confirmationTimeRemaining--;
                     countdownDisplayHandler.postDelayed(this, 1000);
                 } else {
                     String name = isAwaitingLockConfirmation ? authorizedLocker : stableMatchName;
                     String finalStatus = isAwaitingLockConfirmation ? "Confirm Lock Identity" : "Confirm Unlock Identity";
-                    String finalCountdown = "Is this you: " + name + "? (Awaiting confirmation)";
-                    updateUiOnThread(finalStatus, finalCountdown);
+//                    String finalCountdown = "Is this you: " + name + "? (Awaiting confirmation)";
+//                    updateUiOnThread(finalStatus, finalCountdown);
                     stopVisualCountdown();
                 }
             }
@@ -854,7 +854,7 @@ public class MainActivity extends AppCompatActivity {
 
             if (countdownDisplayRunnable == null) {
                 finalMessage = isAwaitingLockConfirmation ? "Confirm Lock Identity" : "Confirm Unlock Identity";
-                countdownMessage = "Is this you: " + authorizedName + "? (Awaiting confirmation)";
+               // countdownMessage = "Is this you: " + authorizedName + "? (Awaiting confirmation)";
             } else {
                 runOnUiThread(() -> overlayView.setFaces(graphics));
                 return;
